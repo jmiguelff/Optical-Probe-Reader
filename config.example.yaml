@@ -1,0 +1,25 @@
+transport:
+  type: serial
+
+serial:
+  device: /dev/ttyUSB0
+  baud: 300
+  data_bits: 7
+  parity: even
+  stop_bits: 1
+  read_timeout_ms: 2000
+
+tcp:
+  address: "192.168.1.50:10001"
+  connect_timeout_ms: 2000
+  read_timeout_ms: 2000
+
+iec62056:
+  mode: "A"
+  wakeup: true
+  inter_char_timeout_ms: 150
+  overall_timeout_ms: 8000
+
+output:
+  format: "raw"
+  pretty: true
