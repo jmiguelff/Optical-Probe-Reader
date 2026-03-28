@@ -39,22 +39,32 @@ type IEC62056Config struct {
 	Mode               string `yaml:"mode"`
 	Wakeup             bool   `yaml:"wakeup"`
 	InterCharTimeoutMs int    `yaml:"inter_char_timeout_ms"`
+	SilenceDurationMs  int    `yaml:"silence_duration_ms"`
+	MaxSilenceWaitMs   int    `yaml:"max_silence_wait_ms"`
+	CaptureIdleGapMs   int    `yaml:"capture_idle_gap_ms"`
+	CaptureMaxTimeMs   int    `yaml:"capture_max_time_ms"`
 	OverallTimeoutMs   int    `yaml:"overall_timeout_ms"`
 }
 
 type OutputConfig struct {
-	Format string `yaml:"format"`
-	Pretty bool   `yaml:"pretty"`
+	Format    string `yaml:"format"`
+	Pretty    bool   `yaml:"pretty"`
+	Directory string `yaml:"directory"`
 }
 
 type Overrides struct {
-	TransportType    string
-	TCPAddress       string
-	SerialDevice     string
-	SerialBaud       int
-	ConnectTimeoutMs int
-	ReadTimeoutMs    int
-	OutputFormat     string
+	TransportType     string
+	TCPAddress        string
+	SerialDevice      string
+	SerialBaud        int
+	ConnectTimeoutMs  int
+	ReadTimeoutMs     int
+	SilenceDurationMs int
+	MaxSilenceWaitMs  int
+	CaptureIdleGapMs  int
+	CaptureMaxTimeMs  int
+	OutputFormat      string
+	OutputDirectory   string
 }
 
 func Default() Config {
@@ -77,11 +87,16 @@ func Default() Config {
 			Mode:               "A",
 			Wakeup:             true,
 			InterCharTimeoutMs: 150,
-			OverallTimeoutMs:   8000,
+			SilenceDurationMs:  5000,
+			MaxSilenceWaitMs:   30000,
+			CaptureIdleGapMs:   5000,
+			CaptureMaxTimeMs:   600000,
+			OverallTimeoutMs:   660000,
 		},
 		Output: OutputConfig{
-			Format: "raw",
-			Pretty: true,
+			Format:    "raw",
+			Pretty:    true,
+			Directory: "captures",
 		},
 	}
 }
@@ -125,8 +140,23 @@ func ApplyOverrides(cfg *Config, overrides Overrides) {
 			cfg.Serial.ReadTimeoutMs = overrides.ReadTimeoutMs
 		}
 	}
+	if overrides.SilenceDurationMs > 0 {
+		cfg.IEC62056.SilenceDurationMs = overrides.SilenceDurationMs
+	}
+	if overrides.MaxSilenceWaitMs > 0 {
+		cfg.IEC62056.MaxSilenceWaitMs = overrides.MaxSilenceWaitMs
+	}
+	if overrides.CaptureIdleGapMs > 0 {
+		cfg.IEC62056.CaptureIdleGapMs = overrides.CaptureIdleGapMs
+	}
+	if overrides.CaptureMaxTimeMs > 0 {
+		cfg.IEC62056.CaptureMaxTimeMs = overrides.CaptureMaxTimeMs
+	}
 	if overrides.OutputFormat != "" {
 		cfg.Output.Format = overrides.OutputFormat
+	}
+	if overrides.OutputDirectory != "" {
+		cfg.Output.Directory = overrides.OutputDirectory
 	}
 }
 
@@ -152,6 +182,24 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.IEC62056.InterCharTimeoutMs <= 0 {
 		return fmt.Errorf("iec62056.inter_char_timeout_ms must be > 0")
+	}
+	if cfg.IEC62056.SilenceDurationMs <= 0 {
+		return fmt.Errorf("iec62056.silence_duration_ms must be > 0")
+	}
+	if cfg.IEC62056.MaxSilenceWaitMs <= 0 {
+		return fmt.Errorf("iec62056.max_silence_wait_ms must be > 0")
+	}
+	if cfg.IEC62056.MaxSilenceWaitMs < cfg.IEC62056.SilenceDurationMs {
+		return fmt.Errorf("iec62056.max_silence_wait_ms must be >= iec62056.silence_duration_ms")
+	}
+	if cfg.IEC62056.CaptureIdleGapMs <= 0 {
+		return fmt.Errorf("iec62056.capture_idle_gap_ms must be > 0")
+	}
+	if cfg.IEC62056.CaptureMaxTimeMs <= 0 {
+		return fmt.Errorf("iec62056.capture_max_time_ms must be > 0")
+	}
+	if cfg.Output.Directory == "" {
+		return fmt.Errorf("output.directory is required")
 	}
 
 	return nil

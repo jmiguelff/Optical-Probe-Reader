@@ -46,13 +46,18 @@ func runRead(args []string) error {
 	configPath := flags.String("c", "", "Path to YAML config file")
 
 	transportType := flags.String("transport", "", "Transport type override: serial|tcp")
-	addr := flags.String("addr", "", "TCP address override, e.g. 192.168.1.50:10001")
+	addr := flags.String("addr", "", "TCP address override, e.g. 192.168.1.52:4001")
 	serialDevice := flags.String("serial", "", "Serial device override, e.g. /dev/ttyUSB0")
 	baud := flags.Int("baud", 0, "Serial baud override")
 
 	connectTimeoutMs := flags.Int("connect-timeout-ms", 0, "TCP connect timeout override")
 	readTimeoutMs := flags.Int("read-timeout-ms", 0, "Read timeout override for active transport")
+	silenceDurationMs := flags.Int("silence-duration-ms", 0, "Required silent line time before /?! is sent")
+	maxSilenceWaitMs := flags.Int("max-silence-wait-ms", 0, "Maximum wait for the line to become silent")
+	captureIdleGapMs := flags.Int("capture-idle-gap-ms", 0, "Idle gap that ends capture after data has started")
+	captureMaxTimeMs := flags.Int("capture-max-time-ms", 0, "Maximum time allowed for the capture stage")
 	outputFormat := flags.String("output", "", "Output format override (currently supported: raw)")
+	outputDir := flags.String("output-dir", "", "Directory for metering_{timestamp}.txt dumps")
 
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -68,13 +73,18 @@ func runRead(args []string) error {
 	}
 
 	config.ApplyOverrides(&cfg, config.Overrides{
-		TransportType:    *transportType,
-		TCPAddress:       *addr,
-		SerialDevice:     *serialDevice,
-		SerialBaud:       *baud,
-		ConnectTimeoutMs: *connectTimeoutMs,
-		ReadTimeoutMs:    *readTimeoutMs,
-		OutputFormat:     *outputFormat,
+		TransportType:     *transportType,
+		TCPAddress:        *addr,
+		SerialDevice:      *serialDevice,
+		SerialBaud:        *baud,
+		ConnectTimeoutMs:  *connectTimeoutMs,
+		ReadTimeoutMs:     *readTimeoutMs,
+		SilenceDurationMs: *silenceDurationMs,
+		MaxSilenceWaitMs:  *maxSilenceWaitMs,
+		CaptureIdleGapMs:  *captureIdleGapMs,
+		CaptureMaxTimeMs:  *captureMaxTimeMs,
+		OutputFormat:      *outputFormat,
+		OutputDirectory:   *outputDir,
 	})
 
 	if err := cfg.Validate(); err != nil {
@@ -101,7 +111,13 @@ func runRead(args []string) error {
 		return fmt.Errorf("protocol read: %w", err)
 	}
 
-	return output.WriteRaw(os.Stdout, raw)
+	filePath, err := output.WriteRawFile(cfg.Output.Directory, raw, time.Now())
+	if err != nil {
+		return fmt.Errorf("write raw dump: %w", err)
+	}
+
+	_, err = fmt.Fprintf(os.Stderr, "raw dump written to %s\n", filePath)
+	return err
 }
 
 func printUsage() {
@@ -111,7 +127,10 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Overrides:")
 	fmt.Fprintln(os.Stderr, "  --transport=serial|tcp")
 	fmt.Fprintln(os.Stderr, "  --serial=/dev/ttyUSB0 --baud=300")
-	fmt.Fprintln(os.Stderr, "  --addr=192.168.1.50:10001")
+	fmt.Fprintln(os.Stderr, "  --addr=192.168.1.52:4001")
 	fmt.Fprintln(os.Stderr, "  --connect-timeout-ms=2000 --read-timeout-ms=2000")
+	fmt.Fprintln(os.Stderr, "  --silence-duration-ms=5000 --max-silence-wait-ms=30000")
+	fmt.Fprintln(os.Stderr, "  --capture-idle-gap-ms=5000 --capture-max-time-ms=600000")
+	fmt.Fprintln(os.Stderr, "  --output-dir=./captures")
 	fmt.Fprintln(os.Stderr, "  --output=raw")
 }
