@@ -2,16 +2,11 @@ transport:
   type: serial
 
 serial:
-  device: /dev/ttyUSB0
+  device: /dev/tty.usbserial-FTZ1GY6E
   baud: 300
   data_bits: 7
   parity: even
   stop_bits: 1
-  read_timeout_ms: 2000
-
-tcp:
-  address: "192.168.1.50:10001"
-  connect_timeout_ms: 2000
   read_timeout_ms: 2000
 
 iec62056:
@@ -25,6 +20,6 @@ iec62056:
   overall_timeout_ms: 660000
 
 output:
-  format: "raw"
+  format: "ascii"
   pretty: true
   directory: "captures"

@@ -198,8 +198,10 @@ func (cfg Config) Validate() error {
 	if cfg.IEC62056.CaptureMaxTimeMs <= 0 {
 		return fmt.Errorf("iec62056.capture_max_time_ms must be > 0")
 	}
-	if cfg.Output.Directory == "" {
-		return fmt.Errorf("output.directory is required")
+	switch strings.ToLower(cfg.Output.Format) {
+	case "raw", "hex", "raw-hex", "ascii", "raw-ascii", "text":
+	default:
+		return fmt.Errorf("output.format must be one of: raw, ascii")
 	}
 
 	return nil

@@ -1,7 +1,9 @@
 package output
 
 import (
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,4 +39,21 @@ func WriteRawFile(dir string, data []byte, now time.Time) (string, error) {
 	}
 
 	return filePath, nil
+}
+
+func WriteRawASCII(writer io.Writer, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	_, err := writer.Write(data)
+	return err
+}
+
+func WriteRawHex(writer io.Writer, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	_, err := writer.Write([]byte(hex.EncodeToString(data)))
+	return err
 }

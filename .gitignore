@@ -34,3 +34,4 @@ go.work.sum
 # Binary files
 meter
 meter-rpi
+meter-armv7

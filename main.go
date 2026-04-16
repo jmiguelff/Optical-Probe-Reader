@@ -15,6 +15,11 @@ import (
 	"optical-probe-reader/internal/transport"
 )
 
+var (
+	errReadTimedOut   = errors.New("read incomplete: timeout before ETX+BCC")
+	errReadIncomplete = errors.New("read incomplete: ETX+BCC not found")
+)
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -35,7 +40,14 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		switch {
+		case errors.Is(err, errReadTimedOut):
+			os.Exit(3)
+		case errors.Is(err, errReadIncomplete):
+			os.Exit(4)
+		default:
+			os.Exit(1)
+		}
 	}
 }
 
@@ -91,10 +103,6 @@ func runRead(args []string) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	if !strings.EqualFold(cfg.Output.Format, "raw") {
-		return errors.New("only raw output is implemented for now; set output.format=raw")
-	}
-
 	tr, err := transport.New(cfg)
 	if err != nil {
 		return fmt.Errorf("create transport: %w", err)
@@ -106,18 +114,41 @@ func runRead(args []string) error {
 	defer cancel()
 
 	engine := protocol.NewEngine()
-	raw, err := engine.ReadRaw(ctx, tr, cfg.IEC62056)
+	raw, status, err := engine.ReadRaw(ctx, tr, cfg.IEC62056)
 	if err != nil {
 		return fmt.Errorf("protocol read: %w", err)
 	}
 
-	filePath, err := output.WriteRawFile(cfg.Output.Directory, raw, time.Now())
-	if err != nil {
-		return fmt.Errorf("write raw dump: %w", err)
+	var writeErr error
+	switch strings.ToLower(cfg.Output.Format) {
+	case "ascii", "raw-ascii", "text":
+		writeErr = output.WriteRawASCII(os.Stdout, raw)
+	case "raw", "hex", "raw-hex":
+		writeErr = output.WriteRawHex(os.Stdout, raw)
+	default:
+		return errors.New("unsupported output format")
+	}
+	if writeErr != nil {
+		return writeErr
 	}
 
-	_, err = fmt.Fprintf(os.Stderr, "raw dump written to %s\n", filePath)
-	return err
+	if cfg.Output.Directory != "" {
+		savedPath, err := output.WriteRawFile(cfg.Output.Directory, raw, time.Now())
+		if err != nil {
+			return fmt.Errorf("write raw file: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "saved: %s\n", savedPath)
+	}
+
+	fmt.Fprintf(os.Stderr, "status: %s\n", status)
+	switch status {
+	case protocol.ReadStatusComplete:
+		return nil
+	case protocol.ReadStatusPartialTimeout:
+		return errReadTimedOut
+	default:
+		return errReadIncomplete
+	}
 }
 
 func printUsage() {
@@ -129,8 +160,5 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --serial=/dev/ttyUSB0 --baud=300")
 	fmt.Fprintln(os.Stderr, "  --addr=192.168.1.52:4001")
 	fmt.Fprintln(os.Stderr, "  --connect-timeout-ms=2000 --read-timeout-ms=2000")
-	fmt.Fprintln(os.Stderr, "  --silence-duration-ms=5000 --max-silence-wait-ms=30000")
-	fmt.Fprintln(os.Stderr, "  --capture-idle-gap-ms=5000 --capture-max-time-ms=600000")
-	fmt.Fprintln(os.Stderr, "  --output-dir=./captures")
-	fmt.Fprintln(os.Stderr, "  --output=raw")
+	fmt.Fprintln(os.Stderr, "  --output=raw|ascii")
 }

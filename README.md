@@ -101,8 +101,7 @@ go run . read -c config.example.yaml
   --addr=192.168.1.50:10001 \
   --connect-timeout-ms=2000 \
   --read-timeout-ms=2000 \
-  --output-dir=./captures \
-  --output=raw
+  --output=ascii
 ```
 
 Supported flags on `read`:
@@ -114,12 +113,7 @@ Supported flags on `read`:
 - `--addr=host:port`
 - `--connect-timeout-ms=...`
 - `--read-timeout-ms=...`
-- `--silence-duration-ms=...`
-- `--max-silence-wait-ms=...`
-- `--capture-idle-gap-ms=...`
-- `--capture-max-time-ms=...`
-- `--output-dir=...`
-- `--output=raw`
+- `--output=raw|ascii`
 
 ## Configuration
 
@@ -153,18 +147,33 @@ iec62056:
   overall_timeout_ms: 660000
 
 output:
-  format: "raw"
+  format: "ascii"
   pretty: true
   directory: "captures"
 ```
 
 ## Notes
 
-- Output formats other than `raw` are not implemented yet.
-- Successful reads create `metering_{timestamp}.txt` in `output.directory`; raw bytes are no longer streamed to stdout.
-- Protocol capture stops at the first ETX byte followed by one BCC byte, or returns a partial dump when an idle gap or timeout ends the read.
-- Protocol engine still does not perform full IEC mode negotiation/parsing.
+- `output.format=raw` prints hex bytes for debugging.
+- `output.format=ascii` prints direct text output from the meter.
+- Protocol engine now sends `/?!\r\n`, reads identification, sends fixed ACK (`\x06000\r\n`), and keeps reading without changing baud.
+- Full IEC mode negotiation/parsing is not implemented yet.
 - For serial settings, common IEC startup framing like 7E1 is supported via config.
+
+## Read completion status
+
+After each `read`, the CLI writes a status line to stderr:
+
+- `status: etx_bcc_reached` means the frame ended with ETX+BCC.
+- `status: timeout_before_etx_bcc` means overall timeout hit before ETX+BCC.
+- `status: partial_without_etx_bcc` means read ended without a complete ETX+BCC frame.
+
+Exit codes:
+
+- `0` complete frame (`etx_bcc_reached`)
+- `3` timeout before ETX+BCC
+- `4` partial/incomplete without ETX+BCC
+- `1` other runtime errors
 
 ## Next steps
 

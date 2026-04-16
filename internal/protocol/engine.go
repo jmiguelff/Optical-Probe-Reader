@@ -12,203 +12,158 @@ import (
 	"optical-probe-reader/internal/transport"
 )
 
+type Engine struct{}
+
+type ReadStatus int
+
 const (
-	wakeupSequence        = "\r\n"
-	identificationRequest = "/?!\r\n"
-	etxByte               = 0x03
+	ReadStatusComplete ReadStatus = iota
+	ReadStatusPartialTimeout
+	ReadStatusPartialNoTerminator
 )
 
-type Engine struct{}
+const (
+	identificationRequest = "/?!\r\n"
+	etxByte               = byte(0x03)
+	stxByte               = byte(0x02)
+)
 
 func NewEngine() *Engine {
 	return &Engine{}
 }
 
-func (e *Engine) ReadRaw(ctx context.Context, tr transport.Transport, cfg config.IEC62056Config) ([]byte, error) {
-	if err := e.waitForSilence(ctx, tr, cfg); err != nil {
-		return nil, err
+func (s ReadStatus) String() string {
+	switch s {
+	case ReadStatusComplete:
+		return "etx_bcc_reached"
+	case ReadStatusPartialTimeout:
+		return "timeout_before_etx_bcc"
+	case ReadStatusPartialNoTerminator:
+		return "partial_without_etx_bcc"
+	default:
+		return "unknown"
 	}
+}
 
+func (e *Engine) ReadRaw(ctx context.Context, tr transport.Transport, cfg config.IEC62056Config) ([]byte, ReadStatus, error) {
 	if cfg.Wakeup {
-		if _, err := tr.Write([]byte(wakeupSequence)); err != nil {
-			return nil, err
-		}
-
-		if err := sleepWithContext(ctx, 200*time.Millisecond); err != nil {
-			return nil, err
-		}
+		_, _ = tr.Write([]byte("\r\n"))
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	if _, err := tr.Write([]byte(identificationRequest)); err != nil {
-		return nil, err
+		return nil, ReadStatusPartialNoTerminator, err
 	}
 
-	buffer, err := e.captureRawData(ctx, tr, cfg)
+	interCharTimeout := time.Duration(cfg.InterCharTimeoutMs) * time.Millisecond
+	payload, reachedTerminator, timedOut, err := readUntilSilence(ctx, tr, interCharTimeout)
 	if err != nil {
-		return nil, err
-	}
-	if len(buffer) == 0 {
-		return nil, errors.New("no data captured")
+		if len(payload) > 0 {
+			if timedOut {
+				return payload, ReadStatusPartialTimeout, nil
+			}
+			return payload, ReadStatusPartialNoTerminator, nil
+		}
+		return nil, ReadStatusPartialNoTerminator, err
 	}
 
-	return buffer, nil
+	if reachedTerminator {
+		return payload, ReadStatusComplete, nil
+	}
+	if timedOut {
+		return payload, ReadStatusPartialTimeout, nil
+	}
+	return payload, ReadStatusPartialNoTerminator, nil
 }
 
-func (e *Engine) waitForSilence(ctx context.Context, tr transport.Transport, cfg config.IEC62056Config) error {
-	tmp := make([]byte, 256)
-	start := time.Now()
-	lastData := start
-	maxWait := time.Duration(cfg.MaxSilenceWaitMs) * time.Millisecond
-	silenceDuration := time.Duration(cfg.SilenceDurationMs) * time.Millisecond
-	pollTimeout := time.Duration(cfg.InterCharTimeoutMs) * time.Millisecond
-	stageDeadline := start.Add(maxWait)
-
-	for {
-		if time.Since(lastData) >= silenceDuration {
-			return nil
-		}
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if time.Now().After(stageDeadline) {
-			return errors.New("line did not become silent before max_silence_wait_ms")
-		}
-
-		if err := setReadDeadline(ctx, tr, pollTimeout, stageDeadline); err != nil {
-			return err
-		}
-
-		n, err := tr.Read(tmp)
-		if n > 0 {
-			lastData = time.Now()
-		}
-
-		if err == nil || n > 0 {
-			continue
-		}
-
-		if errors.Is(err, io.EOF) {
-			continue
-		}
-
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			continue
-		}
-
-		return err
-	}
-}
-
-func (e *Engine) captureRawData(ctx context.Context, tr transport.Transport, cfg config.IEC62056Config) ([]byte, error) {
+func readUntilSilence(ctx context.Context, tr transport.Transport, interCharTimeout time.Duration) ([]byte, bool, bool, error) {
 	buffer := make([]byte, 0, 1024)
 	tmp := make([]byte, 256)
-	start := time.Now()
-	lastData := start
-	pollTimeout := time.Duration(cfg.InterCharTimeoutMs) * time.Millisecond
-	idleGap := time.Duration(cfg.CaptureIdleGapMs) * time.Millisecond
-	stageDeadline := start.Add(time.Duration(cfg.CaptureMaxTimeMs) * time.Millisecond)
 
 	for {
-		if frame, ok := frameUntilETXBCC(buffer); ok {
-			return frame, nil
-		}
-
-		if err := ctx.Err(); err != nil {
-			if len(buffer) > 0 {
-				return buffer, nil
+		select {
+		case <-ctx.Done():
+			if end, ok := findETXBCCEnd(buffer); ok {
+				frame := append([]byte(nil), buffer[:end]...)
+				return frame, true, false, nil
 			}
-			return nil, err
-		}
-
-		now := time.Now()
-		if now.After(stageDeadline) {
 			if len(buffer) > 0 {
-				return buffer, nil
+				return buffer, false, true, nil
 			}
-			return nil, errors.New("capture_max_time_ms reached before any data was captured")
+			return nil, false, true, ctx.Err()
+		default:
 		}
 
-		if len(buffer) > 0 && now.Sub(lastData) >= idleGap {
-			return buffer, nil
-		}
-
-		if err := setReadDeadline(ctx, tr, pollTimeout, stageDeadline); err != nil {
-			if len(buffer) > 0 {
-				return buffer, nil
-			}
-			return nil, err
-		}
-
+		_ = tr.SetReadDeadline(time.Now().Add(interCharTimeout))
 		n, err := tr.Read(tmp)
+
 		if n > 0 {
 			buffer = append(buffer, tmp[:n]...)
-			lastData = time.Now()
+			if end, ok := findETXBCCEnd(buffer); ok {
+				frame := append([]byte(nil), buffer[:end]...)
+				return frame, true, false, nil
+			}
 			continue
 		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				if len(buffer) > 0 {
-					return buffer, nil
-				}
-				return nil, err
+				return buffer, false, false, nil
 			}
 
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				if len(buffer) > 0 && time.Since(lastData) >= idleGap {
-					return buffer, nil
+				if end, ok := findETXBCCEnd(buffer); ok {
+					frame := append([]byte(nil), buffer[:end]...)
+					return frame, true, false, nil
 				}
 				continue
 			}
 
 			if len(buffer) > 0 {
-				return buffer, nil
+				return buffer, false, false, nil
 			}
-			return nil, err
+			return nil, false, false, err
 		}
 
-		if len(buffer) > 0 && time.Since(lastData) >= idleGap {
-			return buffer, nil
+		if len(buffer) > 0 {
+			return buffer, false, false, nil
 		}
 	}
 }
 
-func frameUntilETXBCC(buffer []byte) ([]byte, bool) {
-	etxPos := bytes.IndexByte(buffer, etxByte)
-	if etxPos == -1 || len(buffer) < etxPos+2 {
-		return nil, false
+func findETXBCCEnd(buffer []byte) (int, bool) {
+	// Prefer IEC text-mode end marker: !\r\n ETX BCC
+	if idx := bytes.Index(buffer, []byte{'!', '\r', '\n', etxByte}); idx >= 0 {
+		bccPos := idx + 4
+		if bccPos < len(buffer) {
+			return bccPos + 1, true
+		}
 	}
 
-	frame := make([]byte, etxPos+2)
-	copy(frame, buffer[:etxPos+2])
-	return frame, true
+	for i := 0; i+1 < len(buffer); i++ {
+		if buffer[i] != etxByte {
+			continue
+		}
+
+		// Validate BCC against STX..ETX only when the frame actually starts with STX.
+		if stxPos := bytes.IndexByte(buffer[:i], stxByte); stxPos == 0 {
+			expected := xorBytes(buffer[stxPos : i+1])
+			if expected != buffer[i+1] {
+				continue
+			}
+		}
+
+		return i + 2, true
+	}
+
+	return 0, false
 }
 
-func setReadDeadline(ctx context.Context, tr transport.Transport, pollTimeout time.Duration, stageDeadline time.Time) error {
-	deadline := time.Now().Add(pollTimeout)
-	if deadline.After(stageDeadline) {
-		deadline = stageDeadline
+func xorBytes(data []byte) byte {
+	var bcc byte
+	for _, b := range data {
+		bcc ^= b
 	}
-
-	if ctxDeadline, ok := ctx.Deadline(); ok && deadline.After(ctxDeadline) {
-		deadline = ctxDeadline
-	}
-
-	return tr.SetReadDeadline(deadline)
-}
-
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return bcc
 }
