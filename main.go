@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"optical-probe-reader/internal/config"
+	"optical-probe-reader/internal/csv"
 	"optical-probe-reader/internal/output"
+	"optical-probe-reader/internal/parser"
 	"optical-probe-reader/internal/protocol"
+	"optical-probe-reader/internal/scheduler"
 	"optical-probe-reader/internal/transport"
 )
 
@@ -30,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "read":
 		err = runRead(os.Args[2:])
+	case "harvest":
+		err = runHarvest(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -68,8 +73,10 @@ func runRead(args []string) error {
 	maxSilenceWaitMs := flags.Int("max-silence-wait-ms", 0, "Maximum wait for the line to become silent")
 	captureIdleGapMs := flags.Int("capture-idle-gap-ms", 0, "Idle gap that ends capture after data has started")
 	captureMaxTimeMs := flags.Int("capture-max-time-ms", 0, "Maximum time allowed for the capture stage")
-	outputFormat := flags.String("output", "", "Output format override (currently supported: raw)")
+	outputFormat := flags.String("output", "", "Output format override (supported: raw|ascii|csv)")
 	outputDir := flags.String("output-dir", "", "Directory for metering_{timestamp}.txt dumps")
+	csvDir := flags.String("csv-dir", "", "CSV directory override (used when --output=csv)")
+	csvArchiveDir := flags.String("csv-archive-dir", "", "CSV archive directory override (used when --output=csv)")
 
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -97,6 +104,8 @@ func runRead(args []string) error {
 		CaptureMaxTimeMs:  *captureMaxTimeMs,
 		OutputFormat:      *outputFormat,
 		OutputDirectory:   *outputDir,
+		CSVDirectory:      *csvDir,
+		CSVArchiveDir:     *csvArchiveDir,
 	})
 
 	if err := cfg.Validate(); err != nil {
@@ -119,8 +128,31 @@ func runRead(args []string) error {
 		return fmt.Errorf("protocol read: %w", err)
 	}
 
+	format := strings.ToLower(cfg.Output.Format)
+
+	if format == "csv" {
+		reading := parser.Parse(raw)
+		machineTime := time.Now()
+		savedPath, err := csv.WriteSingleReadingFile(cfg.CSV.Directory, machineTime, reading)
+		if err != nil {
+			return fmt.Errorf("write CSV: %w", err)
+		}
+
+		fmt.Fprintf(os.Stderr, "csv: wrote 1 reading to %s (parsed_fields=%d)\n", savedPath, reading.ParsedFieldCount())
+		fmt.Fprintf(os.Stderr, "status: %s\n", status)
+
+		switch status {
+		case protocol.ReadStatusComplete:
+			return nil
+		case protocol.ReadStatusPartialTimeout:
+			return errReadTimedOut
+		default:
+			return errReadIncomplete
+		}
+	}
+
 	var writeErr error
-	switch strings.ToLower(cfg.Output.Format) {
+	switch format {
 	case "ascii", "raw-ascii", "text":
 		writeErr = output.WriteRawASCII(os.Stdout, raw)
 	case "raw", "hex", "raw-hex":
@@ -151,14 +183,70 @@ func runRead(args []string) error {
 	}
 }
 
+func runHarvest(args []string) error {
+	flags := flag.NewFlagSet("harvest", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+
+	configPath := flags.String("c", "", "Path to YAML config file")
+	intervalMs := flags.Int("interval-ms", 0, "Collection interval override (milliseconds)")
+	csvDir := flags.String("csv-dir", "", "CSV directory override")
+	csvArchiveDir := flags.String("csv-archive-dir", "", "CSV archive directory override")
+
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	cfg := config.Default()
+	if *configPath != "" {
+		loadedConfig, err := config.LoadYAML(*configPath)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		cfg = loadedConfig
+	}
+
+	config.ApplyOverrides(&cfg, config.Overrides{
+		CSVEnabled:    true,
+		CSVDirectory:  *csvDir,
+		CSVArchiveDir: *csvArchiveDir,
+		CSVIntervalMs: *intervalMs,
+	})
+
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
+	if !cfg.CSV.Enabled {
+		cfg.CSV.Enabled = true
+	}
+
+	harvester, err := scheduler.NewHarvester(cfg)
+	if err != nil {
+		return fmt.Errorf("create harvester: %w", err)
+	}
+
+	return harvester.Run()
+}
+
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  meter read -c config.yaml [overrides]")
+	fmt.Fprintln(os.Stderr, "  meter harvest -c config.yaml [overrides]")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Overrides:")
+	fmt.Fprintln(os.Stderr, "Commands:")
+	fmt.Fprintln(os.Stderr, "  read     Perform a single meter read")
+	fmt.Fprintln(os.Stderr, "  harvest  Collect meter readings continuously and write to CSV")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Read overrides:")
 	fmt.Fprintln(os.Stderr, "  --transport=serial|tcp")
 	fmt.Fprintln(os.Stderr, "  --serial=/dev/ttyUSB0 --baud=300")
 	fmt.Fprintln(os.Stderr, "  --addr=192.168.1.52:4001")
 	fmt.Fprintln(os.Stderr, "  --connect-timeout-ms=2000 --read-timeout-ms=2000")
-	fmt.Fprintln(os.Stderr, "  --output=raw|ascii")
+	fmt.Fprintln(os.Stderr, "  --output=raw|ascii|csv")
+	fmt.Fprintln(os.Stderr, "  --csv-dir=csv --csv-archive-dir=csv/archive (for --output=csv)")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Harvest overrides:")
+	fmt.Fprintln(os.Stderr, "  --interval-ms=900000")
+	fmt.Fprintln(os.Stderr, "  --csv-dir=csv")
+	fmt.Fprintln(os.Stderr, "  --csv-archive-dir=csv/archive")
 }

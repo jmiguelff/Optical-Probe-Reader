@@ -1,0 +1,25 @@
+transport:
+  type: serial
+
+serial:
+  device: /dev/tty.usbserial-FTZ1GY6E
+  baud: 300
+  data_bits: 7
+  parity: even
+  stop_bits: 1
+  read_timeout_ms: 2000
+
+iec62056:
+  mode: "A"
+  wakeup: true
+  inter_char_timeout_ms: 150
+  silence_duration_ms: 5000
+  max_silence_wait_ms: 30000
+  capture_idle_gap_ms: 5000
+  capture_max_time_ms: 600000
+  overall_timeout_ms: 660000
+
+output:
+  format: "ascii"
+  pretty: true
+  directory: "captures"

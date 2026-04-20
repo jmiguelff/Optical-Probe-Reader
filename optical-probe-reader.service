@@ -1,0 +1,42 @@
+[Unit]
+Description=Optical Probe Reader - IEC 62056-21 Meter Data Harvester
+Documentation=https://github.com/your-repo/optical-probe-reader
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/optical-probe-reader/config.yaml
+
+[Service]
+Type=simple
+User=optical-probe
+Group=optical-probe
+WorkingDirectory=/opt/optical-probe-reader
+
+# Path to the meter binary and config
+ExecStart=/opt/optical-probe-reader/meter harvest -c /etc/optical-probe-reader/config.yaml
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=optical-probe
+
+# Restart policy: restart on failure, with backoff delay
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Timeouts
+TimeoutStartSec=30
+TimeoutStopSec=10
+
+# Security: run as non-root, read-only root filesystem where possible
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/optical-probe-reader/csv /opt/optical-probe-reader/csv/archive
+
+# Environment
+Environment="TZ=UTC"
+
+[Install]
+WantedBy=multi-user.target

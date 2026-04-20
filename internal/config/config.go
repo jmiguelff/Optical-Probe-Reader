@@ -14,6 +14,7 @@ type Config struct {
 	TCP       TCPConfig       `yaml:"tcp"`
 	IEC62056  IEC62056Config  `yaml:"iec62056"`
 	Output    OutputConfig    `yaml:"output"`
+	CSV       CSVConfig       `yaml:"csv"`
 }
 
 type TransportConfig struct {
@@ -52,6 +53,13 @@ type OutputConfig struct {
 	Directory string `yaml:"directory"`
 }
 
+type CSVConfig struct {
+	Enabled              bool   `yaml:"enabled"`
+	Directory            string `yaml:"directory"`
+	ArchiveDirectory     string `yaml:"archive_directory"`
+	CollectionIntervalMs int    `yaml:"collection_interval_ms"`
+}
+
 type Overrides struct {
 	TransportType     string
 	TCPAddress        string
@@ -65,6 +73,10 @@ type Overrides struct {
 	CaptureMaxTimeMs  int
 	OutputFormat      string
 	OutputDirectory   string
+	CSVEnabled        bool
+	CSVDirectory      string
+	CSVArchiveDir     string
+	CSVIntervalMs     int
 }
 
 func Default() Config {
@@ -97,6 +109,12 @@ func Default() Config {
 			Format:    "raw",
 			Pretty:    true,
 			Directory: "captures",
+		},
+		CSV: CSVConfig{
+			Enabled:              false,
+			Directory:            "csv",
+			ArchiveDirectory:     "csv/archive",
+			CollectionIntervalMs: 900000, // 15 minutes
 		},
 	}
 }
@@ -158,6 +176,18 @@ func ApplyOverrides(cfg *Config, overrides Overrides) {
 	if overrides.OutputDirectory != "" {
 		cfg.Output.Directory = overrides.OutputDirectory
 	}
+	if overrides.CSVEnabled {
+		cfg.CSV.Enabled = true
+	}
+	if overrides.CSVDirectory != "" {
+		cfg.CSV.Directory = overrides.CSVDirectory
+	}
+	if overrides.CSVArchiveDir != "" {
+		cfg.CSV.ArchiveDirectory = overrides.CSVArchiveDir
+	}
+	if overrides.CSVIntervalMs > 0 {
+		cfg.CSV.CollectionIntervalMs = overrides.CSVIntervalMs
+	}
 }
 
 func (cfg Config) Validate() error {
@@ -199,9 +229,9 @@ func (cfg Config) Validate() error {
 		return fmt.Errorf("iec62056.capture_max_time_ms must be > 0")
 	}
 	switch strings.ToLower(cfg.Output.Format) {
-	case "raw", "hex", "raw-hex", "ascii", "raw-ascii", "text":
+	case "raw", "hex", "raw-hex", "ascii", "raw-ascii", "text", "csv":
 	default:
-		return fmt.Errorf("output.format must be one of: raw, ascii")
+		return fmt.Errorf("output.format must be one of: raw, ascii, csv")
 	}
 
 	return nil

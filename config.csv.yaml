@@ -1,12 +1,9 @@
 transport:
-  type: serial
+  type: tcp
 
-serial:
-  device: /dev/tty.usbserial-FTZ1GY6E
-  baud: 300
-  data_bits: 7
-  parity: even
-  stop_bits: 1
+tcp:
+  address: "192.168.1.52:4001"
+  connect_timeout_ms: 2000
   read_timeout_ms: 2000
 
 iec62056:
@@ -23,3 +20,9 @@ output:
   format: "ascii"
   pretty: true
   directory: "captures"
+
+csv:
+  enabled: true
+  directory: "csv"
+  archive_directory: "csv/archive"
+  collection_interval_ms: 900000
