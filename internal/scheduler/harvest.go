@@ -21,28 +21,20 @@ import (
 type Harvester struct {
 	cfg       config.Config
 	interval  time.Duration
-	tr        transport.Transport
 	csvWriter *csv.RotatingWriter
 	engine    *protocol.Engine
 }
 
 // NewHarvester creates a new Harvester with the given config.
 func NewHarvester(cfg config.Config) (*Harvester, error) {
-	tr, err := transport.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create transport: %w", err)
-	}
-
 	csvWriter, err := csv.NewRotatingWriter(cfg.CSV.Directory, cfg.CSV.ArchiveDirectory)
 	if err != nil {
-		tr.Close()
 		return nil, fmt.Errorf("create CSV writer: %w", err)
 	}
 
 	return &Harvester{
 		cfg:       cfg,
 		interval:  time.Duration(cfg.CSV.CollectionIntervalMs) * time.Millisecond,
-		tr:        tr,
 		csvWriter: csvWriter,
 		engine:    protocol.NewEngine(),
 	}, nil
@@ -81,11 +73,17 @@ func (h *Harvester) Run() error {
 func (h *Harvester) collectOnce() error {
 	machineTime := time.Now()
 
+	tr, err := transport.New(h.cfg)
+	if err != nil {
+		return fmt.Errorf("create transport: %w", err)
+	}
+	defer tr.Close()
+
 	overallTimeout := time.Duration(h.cfg.IEC62056.OverallTimeoutMs) * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 
-	raw, status, err := h.engine.ReadRaw(ctx, h.tr, h.cfg.IEC62056)
+	raw, status, err := h.engine.ReadRaw(ctx, tr, h.cfg.IEC62056)
 	if err != nil {
 		return fmt.Errorf("read: %w", err)
 	}
@@ -128,7 +126,6 @@ func (h *Harvester) collectOnce() error {
 
 // Close cleans up resources: closes the transport and CSV writer.
 func (h *Harvester) Close() error {
-	h.tr.Close()
 	if h.csvWriter != nil {
 		if err := h.csvWriter.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "harvest: close CSV writer: %v\n", err)
