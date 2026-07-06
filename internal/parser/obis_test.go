@@ -115,6 +115,25 @@ func TestTotalsFallBackToTariffSum(t *testing.T) {
 	assertFloat(t, reading.EnergyImportTotal, 36, "EnergyImportTotal")
 }
 
+func TestImportTotalPrefersOfficialWhenTariffMissing(t *testing.T) {
+	// OBIS 20 must win even when a tariff is absent: with 8.3 missing the
+	// tariff sum would be 35, but the official register says 100. This proves
+	// the import total is immune to a tariff register missing from a dump.
+	raw := []byte("8.1(10*kWh)\r\n8.2(20*kWh)\r\n8.4(5*kWh)\r\n20(100*kWh)\r\n")
+	reading := Parse(raw)
+	assertFloat(t, reading.EnergyImportTotal, 100, "EnergyImportTotal")
+}
+
+func TestTotalNilWhenSingleTariffAndNoOfficial(t *testing.T) {
+	// Only T1 present, no T2 and no official register: the fallback requires
+	// at least T1 and T2, so the total stays nil rather than reporting T1 alone.
+	raw := []byte("8.1(10*kWh)\r\n")
+	reading := Parse(raw)
+	if reading.EnergyImportTotal != nil {
+		t.Fatalf("EnergyImportTotal = %v, want nil", *reading.EnergyImportTotal)
+	}
+}
+
 func assertFloat(t *testing.T, got *float64, want float64, label string) {
 	t.Helper()
 
