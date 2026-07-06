@@ -52,6 +52,10 @@ var csvHeaders = []string{
 	"reactive_quadrant_48_2_kvarh",
 	"reactive_quadrant_49_1_kvarh",
 	"reactive_quadrant_49_2_kvarh",
+	"energy_import_t3_kwh",
+	"energy_import_t4_kwh",
+	"energy_export_t3_kwh",
+	"energy_export_t4_kwh",
 }
 
 // NewRotatingWriter creates a new rotating CSV writer.
@@ -244,6 +248,10 @@ func readingToRow(machineTime time.Time, reading *parser.MeterReading) []string 
 		floatOrEmpty(reading.ReactiveQuadrant482),
 		floatOrEmpty(reading.ReactiveQuadrant491),
 		floatOrEmpty(reading.ReactiveQuadrant492),
+		floatOrEmpty(reading.EnergyImportT3),
+		floatOrEmpty(reading.EnergyImportT4),
+		floatOrEmpty(reading.EnergyExportT3),
+		floatOrEmpty(reading.EnergyExportT4),
 	}
 }
 
