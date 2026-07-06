@@ -63,6 +63,58 @@ func TestParseLegacyShortCodes(t *testing.T) {
 	assertFloat(t, reading.FrequencyHz, 50.0, "FrequencyHz")
 }
 
+func TestParseFourTariffRealDump(t *testing.T) {
+	raw := []byte("/LGZ4\\2ZMD4054407.B31\r\n" +
+		"8.1(00050714*kWh)\r\n" +
+		"8.1*80(00050670)\r\n" + // historical snapshot, must be ignored
+		"8.2(00034362*kWh)\r\n" +
+		"8.3(00072590*kWh)\r\n" +
+		"8.4(00034175*kWh)\r\n" +
+		"9.1(01507421*kWh)\r\n" +
+		"9.1*80(01501447)\r\n" + // historical snapshot, must be ignored
+		"9.2(01022150*kWh)\r\n" +
+		"9.3(02917125*kWh)\r\n" +
+		"9.4(01027411*kWh)\r\n" +
+		"20(00191841*kWh)\r\n" +
+		"20*80(00191700)\r\n" +
+		"21(06474108*kWh)\r\n" +
+		"21*80(06454460)\r\n" +
+		"11(11:18:22)\r\n" +
+		"12(26-07-06)\r\n" +
+		"!\r\n")
+
+	reading := Parse(raw)
+
+	assertFloat(t, reading.EnergyImportT1, 50714, "EnergyImportT1")
+	assertFloat(t, reading.EnergyImportT2, 34362, "EnergyImportT2")
+	assertFloat(t, reading.EnergyImportT3, 72590, "EnergyImportT3")
+	assertFloat(t, reading.EnergyImportT4, 34175, "EnergyImportT4")
+	assertFloat(t, reading.EnergyExportT1, 1507421, "EnergyExportT1")
+	assertFloat(t, reading.EnergyExportT2, 1022150, "EnergyExportT2")
+	assertFloat(t, reading.EnergyExportT3, 2917125, "EnergyExportT3")
+	assertFloat(t, reading.EnergyExportT4, 1027411, "EnergyExportT4")
+
+	// Totals must come from the official registers (OBIS 20 / 21), not the
+	// tariff sum. Export is the discriminating case: sum 9.1..9.4 = 6474107,
+	// but OBIS 21 = 6474108.
+	assertFloat(t, reading.EnergyImportTotal, 191841, "EnergyImportTotal")
+	assertFloat(t, reading.EnergyExportTotal, 6474108, "EnergyExportTotal")
+}
+
+func TestGrandTotalPreferredWhenDiffersFromSum(t *testing.T) {
+	// Tariff sum = 30, but the official register says 100. Must use 100.
+	raw := []byte("9.1(10*kWh)\r\n9.2(20*kWh)\r\n21(100*kWh)\r\n")
+	reading := Parse(raw)
+	assertFloat(t, reading.EnergyExportTotal, 100, "EnergyExportTotal")
+}
+
+func TestTotalsFallBackToTariffSum(t *testing.T) {
+	// No OBIS 20 present: sum the available tariffs (10+20+5+1 = 36).
+	raw := []byte("8.1(10*kWh)\r\n8.2(20*kWh)\r\n8.3(5*kWh)\r\n8.4(1*kWh)\r\n")
+	reading := Parse(raw)
+	assertFloat(t, reading.EnergyImportTotal, 36, "EnergyImportTotal")
+}
+
 func assertFloat(t *testing.T, got *float64, want float64, label string) {
 	t.Helper()
 

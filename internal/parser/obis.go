@@ -19,12 +19,16 @@ type MeterReading struct {
 	// Core energy fields (kWh)
 	EnergyImportT1 *float64 // 8.1
 	EnergyImportT2 *float64 // 8.2
+	EnergyImportT3 *float64 // 8.3
+	EnergyImportT4 *float64 // 8.4
 	EnergyExportT1 *float64 // 9.1
 	EnergyExportT2 *float64 // 9.2
+	EnergyExportT3 *float64 // 9.3
+	EnergyExportT4 *float64 // 9.4
 
-	// Calculated totals
-	EnergyImportTotal *float64 // 8.1 + 8.2
-	EnergyExportTotal *float64 // 9.1 + 9.2
+	// Calculated totals (prefer meter's official register, else tariff sum)
+	EnergyImportTotal *float64 // OBIS 20 (+A total), else 8.1+8.2[+8.3][+8.4]
+	EnergyExportTotal *float64 // OBIS 21 (-A total), else 9.1+9.2[+9.3][+9.4]
 
 	// Power
 	ActivePowerKW     *float64 // P (kW)
@@ -68,8 +72,12 @@ func Parse(rawData []byte) *MeterReading {
 	// Parse all OBIS codes
 	reading.EnergyImportT1 = extractFloat(observedValues, "1.8.1", "8.1")
 	reading.EnergyImportT2 = extractFloat(observedValues, "1.8.2", "8.2")
+	reading.EnergyImportT3 = extractFloat(observedValues, "1.8.3", "8.3")
+	reading.EnergyImportT4 = extractFloat(observedValues, "1.8.4", "8.4")
 	reading.EnergyExportT1 = extractFloat(observedValues, "2.8.1", "9.1")
 	reading.EnergyExportT2 = extractFloat(observedValues, "2.8.2", "9.2")
+	reading.EnergyExportT3 = extractFloat(observedValues, "2.8.3", "9.3")
+	reading.EnergyExportT4 = extractFloat(observedValues, "2.8.4", "9.4")
 
 	reading.ActivePowerKW = extractFloat(observedValues, "16.7.0", "15.7.0", "1.7.0", "P")
 	reading.ReactivePowerKVAR = extractFloat(observedValues, "R")
@@ -98,8 +106,12 @@ func Parse(rawData []byte) *MeterReading {
 	// Parse timestamp from OBIS 12 and 11
 	reading.TimestampEM = extractTimestamp(observedValues)
 
+	// Read official grand-total registers (OBIS 20 = +A total, OBIS 21 = -A total)
+	importGrandTotal := extractFloat(observedValues, "1.8.0", "20")
+	exportGrandTotal := extractFloat(observedValues, "2.8.0", "21")
+
 	// Calculate totals
-	reading.calculateTotals()
+	reading.calculateTotals(importGrandTotal, exportGrandTotal)
 
 	return reading
 }
@@ -248,16 +260,41 @@ func padDigits(value string, width int) string {
 }
 
 // calculateTotals derives energy_import_total and energy_export_total.
-func (m *MeterReading) calculateTotals() {
-	if m.EnergyImportT1 != nil && m.EnergyImportT2 != nil {
-		total := *m.EnergyImportT1 + *m.EnergyImportT2
-		m.EnergyImportTotal = &total
-	}
+// It prefers the meter's official grand-total register (OBIS 20 for +A,
+// OBIS 21 for -A) when present: that value is authoritative and immune to a
+// tariff register missing from a single dump. Otherwise it falls back to
+// summing the available tariff registers (requiring at least T1 and T2,
+// preserving legacy 2-tariff behavior).
+func (m *MeterReading) calculateTotals(importGrandTotal, exportGrandTotal *float64) {
+	m.EnergyImportTotal = grandTotalOrTariffSum(
+		importGrandTotal,
+		m.EnergyImportT1, m.EnergyImportT2, m.EnergyImportT3, m.EnergyImportT4,
+	)
+	m.EnergyExportTotal = grandTotalOrTariffSum(
+		exportGrandTotal,
+		m.EnergyExportT1, m.EnergyExportT2, m.EnergyExportT3, m.EnergyExportT4,
+	)
+}
 
-	if m.EnergyExportT1 != nil && m.EnergyExportT2 != nil {
-		total := *m.EnergyExportT1 + *m.EnergyExportT2
-		m.EnergyExportTotal = &total
+// grandTotalOrTariffSum returns a copy of grandTotal when present. Otherwise,
+// when both t1 and t2 are present, it returns their sum plus any present
+// t3/t4. Returns nil when neither an official total nor T1+T2 are available.
+func grandTotalOrTariffSum(grandTotal, t1, t2, t3, t4 *float64) *float64 {
+	if grandTotal != nil {
+		v := *grandTotal
+		return &v
 	}
+	if t1 == nil || t2 == nil {
+		return nil
+	}
+	sum := *t1 + *t2
+	if t3 != nil {
+		sum += *t3
+	}
+	if t4 != nil {
+		sum += *t4
+	}
+	return &sum
 }
 
 // ParsedFieldCount returns how many parser output fields are populated.
@@ -271,8 +308,12 @@ func (m *MeterReading) ParsedFieldCount() int {
 	values := []*float64{
 		m.EnergyImportT1,
 		m.EnergyImportT2,
+		m.EnergyImportT3,
+		m.EnergyImportT4,
 		m.EnergyExportT1,
 		m.EnergyExportT2,
+		m.EnergyExportT3,
+		m.EnergyExportT4,
 		m.EnergyImportTotal,
 		m.EnergyExportTotal,
 		m.ActivePowerKW,
