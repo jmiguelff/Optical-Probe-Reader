@@ -28,9 +28,13 @@ var csvHeaders = []string{
 	"timestamp_em",
 	"energy_import_t1_kwh",
 	"energy_import_t2_kwh",
+	"energy_import_t3_kwh",
+	"energy_import_t4_kwh",
 	"energy_import_total_kwh",
 	"energy_export_t1_kwh",
 	"energy_export_t2_kwh",
+	"energy_export_t3_kwh",
+	"energy_export_t4_kwh",
 	"energy_export_total_kwh",
 	"active_power_kw",
 	"reactive_power_kvar",
@@ -52,10 +56,6 @@ var csvHeaders = []string{
 	"reactive_quadrant_48_2_kvarh",
 	"reactive_quadrant_49_1_kvarh",
 	"reactive_quadrant_49_2_kvarh",
-	"energy_import_t3_kwh",
-	"energy_import_t4_kwh",
-	"energy_export_t3_kwh",
-	"energy_export_t4_kwh",
 }
 
 // NewRotatingWriter creates a new rotating CSV writer.
@@ -224,9 +224,13 @@ func readingToRow(machineTime time.Time, reading *parser.MeterReading) []string 
 		reading.TimestampEM,
 		floatOrEmpty(reading.EnergyImportT1),
 		floatOrEmpty(reading.EnergyImportT2),
+		floatOrEmpty(reading.EnergyImportT3),
+		floatOrEmpty(reading.EnergyImportT4),
 		floatOrEmpty(reading.EnergyImportTotal),
 		floatOrEmpty(reading.EnergyExportT1),
 		floatOrEmpty(reading.EnergyExportT2),
+		floatOrEmpty(reading.EnergyExportT3),
+		floatOrEmpty(reading.EnergyExportT4),
 		floatOrEmpty(reading.EnergyExportTotal),
 		floatOrEmpty(reading.ActivePowerKW),
 		floatOrEmpty(reading.ReactivePowerKVAR),
@@ -248,10 +252,6 @@ func readingToRow(machineTime time.Time, reading *parser.MeterReading) []string 
 		floatOrEmpty(reading.ReactiveQuadrant482),
 		floatOrEmpty(reading.ReactiveQuadrant491),
 		floatOrEmpty(reading.ReactiveQuadrant492),
-		floatOrEmpty(reading.EnergyImportT3),
-		floatOrEmpty(reading.EnergyImportT4),
-		floatOrEmpty(reading.EnergyExportT3),
-		floatOrEmpty(reading.EnergyExportT4),
 	}
 }
 
